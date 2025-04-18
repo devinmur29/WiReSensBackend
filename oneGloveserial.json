@@ -3,7 +3,7 @@
     "tcp_ip": "",
     "port": 7001,
     "numNodes": 120,
-    "ssid": "StataCenter",
+    "ssid": "MLDEV",
     "password": ""
   },
 
@@ -16,23 +16,6 @@
   "sensors": [
     {
       "id": 1,
-      "protocol": "serial",
-      "serialPort": "COM8",
-      "deviceName": "Esp1",
-      "startCoord": [0, 0],
-      "endCoord": [15, 15],
-      "resistance": 3,
-      "intermittent": {
-        "enabled": false,
-        "p": 21,
-        "d": 46
-      },
-      "outlineImage": "",
-      "saturatedPercentage": 1,
-      "duration": 15000
-    },
-    {
-      "id": 2,
       "protocol": "serial",
       "serialPort": "COM5",
       "deviceName": "Esp2",

@@ -223,6 +223,7 @@ class SerialReceiver(GenericReceiverClass):
             serObjs.append(ser)
             loop = asyncio.get_running_loop()
             transport, protocol = await serial_asyncio.connection_for_serial(loop, lambda: SerialProtocol(self), ser)
+            notify_device_connected(self.sensors[sensor].id, True)
             transports.append(transport)
         
         

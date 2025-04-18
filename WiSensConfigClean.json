@@ -17,10 +17,10 @@
     {
       "id": 1,
       "protocol": "ble",
-      "serialPort": "COM6",
+      "serialPort": "COM5",
       "deviceName": "Esp1",
       "startCoord": [0, 0],
-      "endCoord": [31, 31],
+      "endCoord": [15, 15],
       "resistance": 25,
       "intermittent": {
         "enabled": false,
