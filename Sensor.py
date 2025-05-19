@@ -43,7 +43,7 @@ class Sensor():
 
 
     def append_data(self, ts,reading, packet):
-        # print(ts)
+        print(ts)
         f = self.file
         block_size = self.block_size
         fc = self.fc

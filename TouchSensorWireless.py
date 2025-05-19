@@ -207,11 +207,11 @@ class SerialReceiver(GenericReceiverClass):
         self.reader = None
         self.stopStr = bytes('wr','utf-8')
         self.stopFlag = stopFlag
+        self.transports = []
 
 
     async def read_serial(self):
         serObjs = []
-        transports = []
         for sensor in self.sensors:
             ser = serial.Serial()
             ser.port = self.sensors[sensor].port
@@ -224,7 +224,7 @@ class SerialReceiver(GenericReceiverClass):
             loop = asyncio.get_running_loop()
             transport, protocol = await serial_asyncio.connection_for_serial(loop, lambda: SerialProtocol(self), ser)
             notify_device_connected(self.sensors[sensor].id, True)
-            transports.append(transport)
+            self.transports.append(transport)
         
         
         # Keep running until stopFlag is set
@@ -232,13 +232,14 @@ class SerialReceiver(GenericReceiverClass):
             await asyncio.sleep(0.1)  # Avoid blocking loop
 
         print("Stopping serial reader.")
-        for transport in transports:
-            transport.close()
+        
 
     
 
     async def stopReceiver(self):
-        print("Stopped reading")
+        for transport in self.transports:
+            transport.close()
+        print("Transports stopped")
 
 
     def startReceiverThreads(self):
@@ -450,8 +451,9 @@ class MultiProtocolReceiver():
         while not self.stopFlag.is_set():
             await asyncio.sleep(0.5)
         for receiver in self.receivers:
-            if isinstance(receiver, BLEReceiver):
+            if isinstance(receiver, BLEReceiver) or isinstance(receiver, SerialReceiver):
                 await receiver.stopReceiver()
+
 
         self.receiveTasks = []  # Clear receiveTasks to allow fresh tasks on restart
         self.receivers = []  # Clear receivers list
