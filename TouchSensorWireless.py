@@ -32,7 +32,7 @@ class SerialProtocol(asyncio.Protocol):
 
     def data_received(self, data):
         """Called when new data is received."""
-        
+        print(data)
         self.receiver.buffer.put_nowait(data)  # Directly put data without creating a task
 
     def connection_lost(self, exc):
@@ -150,7 +150,6 @@ class BLEReceiver(GenericReceiverClass):
                 await client.connect()
 
         def notification_handler(characteristic: BleakGATTCharacteristic, data: bytearray):
-            try:
                 sendId, startIdx, sensorReadings, packet = self.unpackBytesPacket(data)
                 sensor = self.sensors[sendId]
                 if(sensor.intermittent):
@@ -160,8 +159,7 @@ class BLEReceiver(GenericReceiverClass):
                         sensor.processRowReadNode(sensorReadings,packet,record=self.record)
                     else:
                         sensor.processRow(startIdx,sensorReadings,packet,record=self.record)
-            except Exception as e:
-                print("thread stopped")
+
         try:
             await client.start_notify("1766324e-8b30-4d23-bff2-e5209c3d986f", notification_handler)
             notify_device_connected(deviceTuple[1], True)
@@ -215,7 +213,9 @@ class SerialReceiver(GenericReceiverClass):
         for sensor in self.sensors:
             ser = serial.Serial()
             ser.port = self.sensors[sensor].port
+            print(ser.port)
             ser.baudrate = self.baudrate
+            print(ser.baudrate)
             ser.dtr = False
             ser.rts = False
             ser.timeout=1

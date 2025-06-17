@@ -39,6 +39,7 @@ class GenericReceiverClass():
     async def process_line(self, line):
         if len(line) == 1+(1+self.numNodes)*2+4:
             sendId, startIdx, readings, packetID = self.unpackBytesPacket(line)
+            print(sendId)
             sensor = self.sensors[sendId]
             await sensor.processRowAsync(startIdx, readings, packetID)
 

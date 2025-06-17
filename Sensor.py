@@ -22,7 +22,8 @@ class Sensor():
         self.block_size=1024
         self.packetCount = 0
         self.maxPackets = int(np.ceil(self.pressureLength/self.bufferSize))
-        self.receivedPackets = np.zeros(self.maxPackets)
+        print(self.maxPackets)
+        # self.receivedPackets = np.zeros(self.maxPackets)
         self.lock = asyncio.Lock()
 
         #intermittent 
@@ -43,7 +44,7 @@ class Sensor():
 
 
     def append_data(self, ts,reading, packet):
-        print(ts)
+        # print(ts)
         f = self.file
         block_size = self.block_size
         fc = self.fc
@@ -60,9 +61,9 @@ class Sensor():
             f.create_dataset('ts', tuple([block_size, ]), maxshape = maxShape, dtype=ts.dtype, chunks=True)
             f.create_dataset('predCount', tuple([block_size, ]), maxshape = maxShape, dtype=ts.dtype, chunks=True)
             f.create_dataset('pressure', tuple([block_size, self.selWires,self.readWires]), maxshape=maxshapePressure, dtype=np.int32, chunks=True)
-            if packet is not None:
-                maxshapePackets = [None, self.maxPackets]
-                f.create_dataset('packetNumber', tuple([block_size, self.maxPackets]), maxshape=maxshapePackets, dtype=np.uint32, chunks=True)
+            # if packet is not None:
+            #     maxshapePackets = [None, self.maxPackets]
+            #     f.create_dataset('packetNumber', tuple([block_size, self.maxPackets]), maxshape=maxshapePackets, dtype=np.uint32, chunks=True)
 
         # Check size
         oldSize = f['ts'].shape[0]
@@ -71,15 +72,15 @@ class Sensor():
             f['ts'].resize(newSize, axis=0)
             f['pressure'].resize(newSize, axis=0)
             f['predCount'].resize(newSize, axis=0)
-            if packet is not None:
-                f['packetNumber'].resize(newSize, axis=0)
+            # if packet is not None:
+            #     f['packetNumber'].resize(newSize, axis=0)
 
         f['frame_count'][0] = fc
         f['ts'][fc] = ts
         f['predCount'][fc] = self.predCount
         f['pressure'][fc] = reading.reshape(1, self.selWires,self.readWires)
-        if packet is not None:
-            f['packetNumber'][fc] = self.receivedPackets
+        # if packet is not None:
+        #     f['packetNumber'][fc] = self.receivedPackets
         f.flush()
 
     def fillBuffer(self, startIdx, amountToFill, readings):
@@ -92,9 +93,9 @@ class Sensor():
             self.pressure[:secondSize]=np.array(readings[firstSize:amountToFill])
 
     def processRow(self, startIdx,readings, packet=None, record=True):
-        if packet is not None:
-                self.receivedPackets[self.packetCount]=packet
-                self.packetCount+=1
+        # if packet is not None:
+        #         self.receivedPackets[self.packetCount]=packet
+        #         self.packetCount+=1
         if self.left_to_fill <= self.bufferSize:
 
             if self.left_to_fill > 0:
@@ -104,7 +105,7 @@ class Sensor():
                 self.append_data(ts,self.pressure,packet)
             self.fc+=1
             self.packetCount = 0
-            self.receivedPackets=np.zeros(self.maxPackets)
+            # self.receivedPackets=np.zeros(self.maxPackets)
             remaining = self.bufferSize - self.left_to_fill
             self.fillBuffer((startIdx+self.left_to_fill)%self.pressureLength, remaining, readings[self.left_to_fill:])
             self.left_to_fill = self.pressureLength-remaining
@@ -135,14 +136,14 @@ class Sensor():
                 self.predCount+=1
                 self.packetHandle(self.nextStartIdx,predicted,packetIdx, predTs, record)
                 self.nextStartIdx = (startIdx+self.bufferSize)%self.pressureLength
-                self.receivedPackets[self.packetCount]=packet
+                # self.receivedPackets[self.packetCount]=packet
                 self.packetCount+=1
             self.lastTs = currTs
         else:
             ts = utils.getUnixTimestamp()
             self.packetHandle(startIdx,readings,packet, ts, record)
             self.nextStartIdx = (startIdx+self.bufferSize)%self.pressureLength
-            self.receivedPackets[self.packetCount]=packet
+            # self.receivedPackets[self.packetCount]=packet
             self.packetCount+=1
             self.lastTs = ts
         self.expectedPacket = packet+1
@@ -152,7 +153,7 @@ class Sensor():
 
         
     def packetHandle(self,startIdx,readings,packet, ts, record):
-        print(ts)
+        # print(ts)
         if self.left_to_fill <= self.bufferSize:
             if self.left_to_fill > 0:
                 self.fillBuffer(startIdx,self.left_to_fill,readings)
@@ -163,7 +164,7 @@ class Sensor():
             if self.fc==2:
                 self.intermittentInit=True
             self.packetCount = 0
-            self.receivedPackets=np.zeros(self.maxPackets)
+            # self.receivedPackets=np.zeros(self.maxPackets)
             remaining = self.bufferSize - self.left_to_fill
             self.fillBuffer((startIdx+self.left_to_fill)%self.pressureLength, remaining, readings[self.left_to_fill:])
             self.left_to_fill = self.pressureLength-remaining
