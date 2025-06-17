@@ -1,3 +1,5 @@
+import eventlet
+eventlet.monkey_patch()
 from flask import Flask
 import json
 from flask_socketio import SocketIO
@@ -6,7 +8,15 @@ import time
 import numpy as np
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}) 
-socketio = SocketIO(app, cors_allowed_origins="*")
+# socketio = SocketIO(app, cors_allowed_origins="*")
+
+socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*")  # Explicitly set async mode
+
+def start_server_web(receiver):
+    global myReceiver
+    myReceiver = receiver
+    socketio.run(app, host="0.0.0.0", port=5328, debug=True, use_reloader=False)
+
 
 myReceiver = None  # This will be assigned later
 
@@ -71,6 +81,7 @@ def handle_program(data, id):
     print("Received program message")
     if myReceiver:
         myReceiver.programSensor(id, data)
+        print("finished function")
 
 @socketio.on('calibrate')
 def handle_calibrate(id):

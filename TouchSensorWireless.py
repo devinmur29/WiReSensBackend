@@ -18,6 +18,8 @@ from bleak.backends.characteristic import BleakGATTCharacteristic
 import serial_asyncio
 from flaskApp.index import update_sensors, replay_sensors, start_server, notify_device_connected
 import utils
+import os
+import platform
 
 class SerialProtocol(asyncio.Protocol):
     def __init__(self, receiver):
@@ -255,8 +257,13 @@ def readConfigFile(file):
         data = json5.load(file)
     return data
 
+def recordingsDirectory(recordings):
+    if not os.path.exists(recordings):
+        os.makedirs(recordings)
+
 class MultiProtocolReceiver():
     def __init__(self, configFilePath="./WiSensConfigClean.json"):
+        recordingsDirectory("recordings")
         self.config = readConfigFile(configFilePath)
         self.sensors = self.config['sensors']
         self.bleSensors = []
@@ -285,6 +292,7 @@ class MultiProtocolReceiver():
                 case 'serial':
                     userNumNodes = self.config['serialOptions']['numNodes']
 
+            print("Hello 2s")
             numGroundWires = sensorConfig['endCoord'][1] - sensorConfig['startCoord'][1] + 1
             numReadWires = sensorConfig['endCoord'][0] - sensorConfig['startCoord'][0] + 1
             numNodes = min(userNumNodes,min(120, numGroundWires*numReadWires))
@@ -377,30 +385,49 @@ class MultiProtocolReceiver():
         # Convert the merged data to a JSON string with proper quoting
         json_string = json.dumps(merged_data)
         print(json_string)
-        # Send the JSON string over the serial port
-        ser = serial.Serial(baudrate=data['serialOptions']['baudrate'], timeout=1)
-        if "serialPort" in sensor:
-            ser.port=sensor["serialPort"]
-        else:
-            ser.port=data['serialOptions']['port']
-        ser.open()
-        ser.dtr = False  # Explicitly clear settings
-        ser.rts = False
-        ser.flush()
-        ser.close()
-        time.sleep(1)
-        ser2 = serial.Serial(baudrate=data['serialOptions']['baudrate'], timeout=1)
-        if "serialPort" in sensor:
-            ser2.port=sensor["serialPort"]
-        else:
-            ser2.port=data['serialOptions']['port']
 
-        ser2.dtr = False  
-        ser2.rts = False
-        ser2.open()
-        ser2.flush()
-        ser2.write(json_string.encode('utf-8'))
+        if platform.system() =="Darwin":
+            ser2 = serial.Serial(baudrate=data['serialOptions']['baudrate'], timeout=1)
+            if "serialPort" in sensor:
+                ser2.port=sensor["serialPort"]
+                
+            else:
+                ser2.port=data['serialOptions']['port']
+
+            print(ser2.port)
+            print(ser2.baudrate)
+            ser2.open()
+        else:
+            # Send the JSON string over the serial port
+            ser = serial.Serial(baudrate=data['serialOptions']['baudrate'], timeout=1)
+            if "serialPort" in sensor:
+                ser.port=sensor["serialPort"]
+            else:
+                ser.port=data['serialOptions']['port']
+            ser.open()
+            ser.dtr = False  # Explicitly clear settings
+            ser.rts = False
+            ser.flush()
+            ser.close()
+            time.sleep(1)
+            ser2 = serial.Serial(baudrate=data['serialOptions']['baudrate'], timeout=1)
+            if "serialPort" in sensor:
+                ser2.port=sensor["serialPort"]
+                
+            else:
+                ser2.port=data['serialOptions']['port']
+
+            print(ser2.port)
+            print(ser2.baudrate)
+            ser2.dtr = False  
+            ser2.rts = False
+            ser2.open()
+            ser2.flush()
+
+        ser2.write((json_string).encode('utf-8'))
+        time.sleep(3)
         ser2.close()
+        print("finished program")
         
     def calibrateSensor(self, sensor_id):
         data = self.config

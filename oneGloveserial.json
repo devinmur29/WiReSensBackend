@@ -17,7 +17,7 @@
     {
       "id": 1,
       "protocol": "serial",
-      "serialPort": "COM5",
+      "serialPort": "/dev/tty.usbserial-02840E51",
       "deviceName": "Esp2",
       "startCoord": [0, 0],
       "endCoord": [15, 15],
