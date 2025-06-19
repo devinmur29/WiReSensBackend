@@ -8,16 +8,16 @@
   },
 
   "readoutOptions": {
-    "groundPins": [26, 25, 4, 21, 12],
-    "readPins": [27, 33, 15, 32, 14],
+    "groundPins": [18, 17, 8, 43, 12],
+    "readPins": [11, 10, 9, 6, 5],
     "adcPin": 34
   },
 
   "sensors": [
     {
       "id": 1,
-      "protocol": "ble",
-      "serialPort": "COM16",
+      "protocol": "serial",
+      "serialPort": "COM6",
       "deviceName": "Esp1",
       "startCoord": [0, 0],
       "endCoord": [15, 15],
@@ -33,8 +33,8 @@
     },
     {
       "id": 2,
-      "protocol": "ble",
-      "serialPort": "COM17",
+      "protocol": "serial",
+      "serialPort": "COM12",
       "deviceName": "Esp2",
       "startCoord": [0, 0],
       "endCoord": [15, 15],
@@ -68,3 +68,4 @@
     "localIp": ""
   }
 }
+
