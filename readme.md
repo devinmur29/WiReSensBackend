@@ -75,7 +75,11 @@ This guide walks you through setting up and running the USB recording system for
 
    - Click **Load Config** and select `oneGloveserial.json`.
 
-4. **Start recording:**
+4. **Program Device:**
+
+   - If it is your first time using this device, you may have to program it before recording. Click Device Panel > Edit Icon > Program Device. A "programmed!" message will appear if this is succesful.
+
+5. **Start recording:**
    - Click **Record**.  
      Visualization and recording will start simultaneously.  
      Recordings are saved to the `recordings/` folder.
