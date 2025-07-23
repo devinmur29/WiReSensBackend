@@ -6,6 +6,9 @@ import serial
 import datetime
 from datetime import datetime
 import subprocess
+import struct
+import time
+import serial.tools.list_ports
 
 
 def tactile_reading(path):
@@ -68,4 +71,88 @@ def programSensor(sensor_id, config="./WiSensConfigClean.json"):
     ser.open()
     ser.write(json_string.encode('utf-8'))
     ser.close()
+
+
+def unpackBytesPacket(byteString):
+        format_string = '=b' + 'H' * (1+120) + 'I'  # 'b' for int8_t, 'H' for uint16_t
+        tupData = struct.unpack(format_string,byteString)
+        sendId = tupData[0]
+        startIdx = tupData[1]
+        sensorReadings = tupData[2:-1]
+        packetNumber = tupData[-1]
+        return sendId, startIdx,sensorReadings, packetNumber
+
+def unpackBytesPacket(byteString):
+    format_string = '=b' + 'H' * (1 + 120) + 'I'  # 'b' for int8_t, 'H' for uint16_t, 'I' for uint32_t
+    tupData = struct.unpack(format_string, byteString)
+    sendId = tupData[0]
+    startIdx = tupData[1]
+    sensorReadings = tupData[2:-1]
+    packetNumber = tupData[-1]
+    return sendId, startIdx, sensorReadings, packetNumber
+
+
+def get_send_id(line):
+    expected_len = 1 + (1 + 120) * 2 + 4  # 1 byte for sendId, 121 uint16_t (2 bytes each), 4 bytes for uint32_t
+    if len(line) == expected_len:
+        sendId, startIdx, readings, packetID = unpackBytesPacket(line)
+        return sendId
+    return None
+
+
+def read_line(port, timeout=2.0):
+    port.timeout = 0.1
+    start_time = time.time()
+    buffer = b""
     
+    while time.time() - start_time < timeout:
+        try:
+            data = port.read(256)
+            if data:
+                buffer += data
+                # Split by "wr" marker, which is ASCII for b"wr"
+                parts = buffer.split(b"wr")
+                for part in parts:
+                    sendId = get_send_id(part)
+                    if sendId is not None:
+                        return sendId
+                # Retain only the last part in buffer for next iteration
+                buffer = parts[-1] if parts else b""
+        except Exception as e:
+            print(f"Error reading from port: {e}")
+    return None
+
+
+def discoverPorts(json_path="twoGlovesSerial.json"):
+    with open(json_path, "r") as f:
+        config = json.load(f)
+
+    sensor_config = config["sensors"]
+    discovered_ids = {}
+
+    ports = serial.tools.list_ports.comports()
+    for portInfo in ports:
+        port_name = portInfo.device
+        try:
+            ser = serial.Serial(port=port_name, baudrate=250000, timeout=0.5)
+            time.sleep(1.5)  # Give the device time to boot/send
+            sendId = read_line(ser)
+            ser.close()
+
+            if sendId is not None:
+                print(f"Found device with sendId={sendId} on port {port_name}")
+                discovered_ids[sendId] = port_name
+        except Exception as e:
+            print(f"Could not open port {port_name}: {e}")
+
+    # Update config
+    for sensor in sensor_config:
+        sid = sensor.get("id")
+        if sid in discovered_ids:
+            sensor["serialPort"] = discovered_ids[sid]
+            print(f"Updated sensor ID {sid} to port {discovered_ids[sid]}")
+
+    # Write back the config
+    with open(json_path, "w") as f:
+        json.dump(config, f, indent=2)
+        print(f"Updated {json_path}")

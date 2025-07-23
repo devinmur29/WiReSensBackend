@@ -1,0 +1,58 @@
+{
+  "wifiOptions": {
+    "tcp_ip": "",
+    "port": 7001,
+    "numNodes": 120,
+    "ssid": "MLDEV",
+    "password": ""
+  },
+
+  "readoutOptions": {
+    "groundPins": [18, 17, 8, 43, 12],
+    "readPins": [11, 10, 9, 6, 5],
+    "adcPin": 34,
+    "externalAdc":true
+  },
+
+  "sensors": [
+    {
+      "id": 2,
+      "protocol": "espnow",
+      "serialPort": "COM20",
+      "deviceName": "Esp2",
+      "startCoord": [0, 0],
+      "endCoord": [15, 15],
+      "resistance": 3,
+      "intermittent": {
+        "enabled": false,
+        "p": 21,
+        "d": 46
+      },
+      "outlineImage": "",
+      "saturatedPercentage": 1,
+      "duration": 60000,
+      "glove":"right",
+      "size":"large"
+    }
+  ],
+
+  "serialOptions": {
+    "baudrate": 250000,
+    "numNodes": 120
+  },
+
+  "bleOptions": {
+    "numNodes": 120
+  },
+
+  "espnowOptions": {
+    "macAddress": [160, 163, 179, 144, 124, 188],
+    "numNodes":120
+  },
+
+  "vizOptions": {
+    "pitch": 0,
+    "localIp": "",
+    "glove":true
+  }
+}

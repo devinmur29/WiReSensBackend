@@ -10,14 +10,16 @@
   "readoutOptions": {
     "groundPins": [18, 17, 8, 43, 12],
     "readPins": [11, 10, 9, 6, 5],
-    "adcPin": 34
+    "adcPin": 34,
+    "externalAdc":true
+
   },
 
   "sensors": [
     {
       "id": 1,
       "protocol": "serial",
-      "serialPort": "COM6",
+      "serialPort": "COM20",
       "deviceName": "Esp1",
       "startCoord": [0, 0],
       "endCoord": [15, 15],
@@ -29,7 +31,9 @@
       },
       "outlineImage": "",
       "saturatedPercentage": 1,
-      "duration": 15000
+      "duration": 60000,
+      "glove":"left",
+      "size":"small"
     }
   ],
 
@@ -42,12 +46,14 @@
     "numNodes": 120
   },
 
-  "espOptions": {
-    "macAddress": [160, 163, 179, 144, 124, 188]
+  "espnowOptions": {
+    "macAddress": [160, 163, 179, 144, 124, 188],
+    "numNodes":120
   },
 
   "vizOptions": {
     "pitch": 0,
-    "localIp": ""
+    "localIp": "",
+    "glove":true
   }
 }

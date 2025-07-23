@@ -20,6 +20,11 @@ from flaskApp.index import update_sensors, replay_sensors, start_server, notify_
 import utils
 import os
 import platform
+import qrcode
+import utils  # assuming this contains your getUnixTimestamp function
+import cv2
+from pathlib import Path
+
 
 class SerialProtocol(asyncio.Protocol):
     def __init__(self, receiver):
@@ -517,11 +522,44 @@ class MultiProtocolReceiver():
     def startReceiverThread(self):
         asyncio.run(self.startReceiversAsync())
 
+
+    def timeSyncQR(self):
+        ts = utils.getUnixTimestamp()
+        display_ts = time.time()
+
+        payload = {
+            "gen": ts,
+            "displayed": round(display_ts, 3)
+        }
+
+        qr_string = f"{payload}"
+
+        # Generate QR code as PIL image
+        qr_img = qrcode.make(qr_string)
+
+        # Convert PIL image to OpenCV format
+        qr_img = qr_img.convert("RGB")
+        qr_np = np.array(qr_img)
+        qr_cv = cv2.cvtColor(qr_np, cv2.COLOR_RGB2BGR)
+
+        # Display using OpenCV (faster than external viewer)
+        window_name = "Time Sync QR"
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, 600, 600)
+        cv2.imshow(window_name, qr_cv)
+
+        # Wait for any key (or keep visible for N seconds)
+        print("Press any key to close QR display...")
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+
     def record(self):
         self.initializeReceivers(True)
         captureThread = threading.Thread(target=self.startReceiverThread)
         captureThread.start()
-        captureThread.join()
+        # captureThread.join()
+        self.timeSyncQR()
 
     def visualizeAndRecord(self):
         self.initializeReceivers(True)
@@ -594,9 +632,10 @@ class MultiProtocolReceiver():
         pressureDict = {}
         totalFrames = None
         frameRate = None
+        recordings_dir = Path("recordings")
         for sensorId in fileDict:
             print(sensorId,fileDict)
-            pressure, fc, ts = utils.tactile_reading(fileDict[sensorId])
+            pressure, fc, ts = utils.tactile_reading(recordings_dir / fileDict[sensorId])
             startIdx = 0
             beginTs = ts[0]
             if startTs is not None:

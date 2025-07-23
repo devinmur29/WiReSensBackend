@@ -1,3 +1,5 @@
 from TouchSensorWireless import MultiProtocolReceiver
-myReceiver = MultiProtocolReceiver("./twoGlovesSerial.json")
+from utils import discoverPorts
+# discoverPorts()
+myReceiver = MultiProtocolReceiver("./configs/twoGlovesSerial.json")
 myReceiver.record()
