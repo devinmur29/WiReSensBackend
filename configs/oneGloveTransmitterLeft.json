@@ -8,8 +8,8 @@
   },
 
   "readoutOptions": {
-    "groundPins": [18, 17, 8, 43, 12],
-    "readPins": [11, 10, 9, 6, 5],
+    "groundPins": [26, 25, 4, 21, 12],
+    "readPins": [27, 33, 15, 32, 14],
     "adcPin": 34,
     "externalAdc":true
   },
@@ -18,7 +18,7 @@
     {
       "id": 1,
       "protocol": "espnow",
-      "serialPort": "COM20",
+      "serialPort": "COM26",
       "deviceName": "Esp1",
       "startCoord": [0, 0],
       "endCoord": [15, 15],
@@ -46,7 +46,7 @@
   },
 
   "espnowOptions": {
-    "macAddress": [160, 163, 179, 144, 124, 188],
+    "macAddress": [20, 43, 47, 202, 104, 160],
     "numNodes":120
   },
 
