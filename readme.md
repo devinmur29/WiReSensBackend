@@ -85,7 +85,7 @@ This guide walks you through the full process of recording tactile sensor data u
 3. **Update your configuration file**
 
    Open the relevant JSON config file from the `configs/` folder.
-   Locate the `"serialPort"` field under the `"sensors"` section and update it with your device’s port:
+   Locate the `"serialPort"` field under the `"sensors"` section and update it with your device’s port. If the autoDetectPort method works it will have updated this config file automatically. 
 
    ```json
    "serialPort": "/dev/ttyUSB0"
