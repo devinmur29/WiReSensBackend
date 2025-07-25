@@ -18,7 +18,7 @@
     {
       "id": 1,
       "protocol": "espnow",
-      "serialPort": "COM26",
+      "serialPort": "COM28",
       "deviceName": "Esp1",
       "startCoord": [0, 0],
       "endCoord": [15, 15],
@@ -46,7 +46,7 @@
   },
 
   "espnowOptions": {
-    "macAddress": [20, 43, 47, 202, 104, 160],
+    "macAddress": [20, 43, 47, 202, 117, 216],
     "numNodes":120
   },
 

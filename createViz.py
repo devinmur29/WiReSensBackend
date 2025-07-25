@@ -150,17 +150,21 @@ def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None, 
         left_polys = [list(reversed(v)) for v in voronoi_polygons.values()]
         left_collection = PolyCollection(left_polys, edgecolors='none')
         axs[idx].add_collection(left_collection)
-        axs[idx].set_xlim(100, 800)
-        axs[idx].set_ylim(1050, 200)
+        xs = [x for poly in left_polys for (x, y) in poly]
+        ys = [y for poly in left_polys for (x, y) in poly]
+        axs[idx].set_xlim(min(xs) - 10, max(xs) + 10)
+        axs[idx].set_ylim(max(ys) + 10, min(ys) - 10)
         axs[idx].set_aspect('equal')
         axs[idx].axis('off')
         idx += 1
     if has_right:
         right_polys = [v for v in voronoi_polygons.values()]
         right_collection = PolyCollection(right_polys, edgecolors='none')
+        xs = [x for poly in right_polys for (x, y) in poly]
+        ys = [y for poly in right_polys for (x, y) in poly]
+        axs[idx].set_xlim(min(xs) - 10, max(xs) + 10)
+        axs[idx].set_ylim(max(ys) + 10, min(ys) - 10)
         axs[idx].add_collection(right_collection)
-        axs[idx].set_xlim(100, 800)
-        axs[idx].set_ylim(1050, 200)
         axs[idx].set_aspect('equal')
         axs[idx].axis('off')
 
@@ -200,9 +204,9 @@ def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None, 
 
 if __name__ == "__main__":
     create_video(
-        left_h5="./recordings/whiteLeftCal.hdf5",
-        mapping_json="point_weight_mappings_left.json",
-        svg_file="voronoi_regions_left.svg",
+        left_h5="./recordings/recentLeft.hdf5",
+        mapping_json="point_weight_mappings_large.json",
+        svg_file="voronoi_regions_large.svg",
         output_mp4="glove_viz_pose.mp4",
-        use_normalized=True
+        use_normalized=False
     )
