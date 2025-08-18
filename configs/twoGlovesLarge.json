@@ -6,21 +6,37 @@
     "ssid": "MLDEV",
     "password": ""
   },
-
   "readoutOptions": {
-    "groundPins": [18, 17, 8, 43, 12],
-    "readPins": [11, 10, 9, 6, 5],
+    "groundPins": [
+      18,
+      17,
+      8,
+      43,
+      12
+    ],
+    "readPins": [
+      11,
+      10,
+      9,
+      6,
+      5
+    ],
     "adcPin": 34
   },
-
   "sensors": [
     {
       "id": 1,
       "protocol": "serial",
-      "serialPort": "COM20",
+      "serialPort": "COM18",
       "deviceName": "Esp1",
-      "startCoord": [0, 0],
-      "endCoord": [15, 15],
+      "startCoord": [
+        0,
+        0
+      ],
+      "endCoord": [
+        15,
+        15
+      ],
       "resistance": 3,
       "intermittent": {
         "enabled": false,
@@ -30,16 +46,22 @@
       "outlineImage": "",
       "saturatedPercentage": 1,
       "duration": 15000,
-      "glove":"left",
-      "size":"large"
+      "glove": "left",
+      "size": "large"
     },
     {
       "id": 2,
       "protocol": "serial",
-      "serialPort": "COM21",
+      "serialPort": "COM19",
       "deviceName": "Esp2",
-      "startCoord": [0, 0],
-      "endCoord": [15, 15],
+      "startCoord": [
+        0,
+        0
+      ],
+      "endCoord": [
+        15,
+        15
+      ],
       "resistance": 3,
       "intermittent": {
         "enabled": false,
@@ -49,24 +71,27 @@
       "outlineImage": "",
       "saturatedPercentage": 1,
       "duration": 15000,
-      "glove":"right",
-      "size":"large"
+      "glove": "right",
+      "size": "large"
     }
   ],
-
   "serialOptions": {
     "baudrate": 250000,
     "numNodes": 120
   },
-
   "bleOptions": {
     "numNodes": 120
   },
-
   "espOptions": {
-    "macAddress": [160, 163, 179, 144, 124, 188]
+    "macAddress": [
+      160,
+      163,
+      179,
+      144,
+      124,
+      188
+    ]
   },
-
   "vizOptions": {
     "pitch": 0,
     "glove": true,

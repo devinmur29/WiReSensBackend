@@ -1,18 +1,14 @@
 import h5py
 import json
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.collections import PolyCollection
-import matplotlib
+import cairo
+import imageio.v2 as imageio
 from xml.etree import ElementTree as ET
-
-matplotlib.use("Agg")  # no GUI backend
 
 FPS = 20
 MAX_PRESSURE, MIN_PRESSURE = 3000, 0
 NORMALIZED_VIS_THRESHOLD = 2500
 FALLBACK_COLOR = (0.2, 0.2, 0.2, 1.0)  # dark gray RGBA
-
 
 def load_data(h5_path):
     with h5py.File(h5_path, 'r') as f:
@@ -57,24 +53,48 @@ def interpolate_fast(pressure16x16, precomputed_weights):
         out[label] = np.sum(W * pressure16x16)
     return out
 
+def hsv_to_rgb(h, s, v):
+    h = h % 360
+    c = v * s
+    x = c * (1 - abs((h / 60) % 2 - 1))
+    m = v - c
+
+    if h < 60:
+        rp, gp, bp = c, x, 0
+    elif h < 120:
+        rp, gp, bp = x, c, 0
+    elif h < 180:
+        rp, gp, bp = 0, c, x
+    elif h < 240:
+        rp, gp, bp = 0, x, c
+    elif h < 300:
+        rp, gp, bp = x, 0, c
+    else:
+        rp, gp, bp = c, 0, x
+
+    r, g, b = rp + m, gp + m, bp + m
+    return (r, g, b)
+
 def value_to_color(val):
     clamped = np.clip(val, MIN_PRESSURE, MAX_PRESSURE)
     norm = (clamped - MIN_PRESSURE) / (MAX_PRESSURE - MIN_PRESSURE)
-    hue = (1 - norm) * 240
-    # hsv colormap returns RGBA float tuple, compatible with PolyCollection
-    return plt.cm.hsv(hue / 360)
+    hue = (1 - norm) * 240  # 240 = blue, 0 = red
+    return hsv_to_rgb(hue, 1.0, 1.0)
 
-
-
-
-def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None, output_mp4="output.mp4", use_normalized=True):
-    from matplotlib.animation import FFMpegWriter
+def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None,
+                 output_mp4="output.mp4", use_normalized=True,
+                 width=800, height=800):
 
     assert left_h5 or right_h5, "At least one of left_h5 or right_h5 must be provided."
-    
+
     mapping = json.load(open(mapping_json))
     voronoi_polygons = parse_svg(svg_file)
     polygon_labels = list(voronoi_polygons.keys())
+
+    # Extract hand outline polygon points for clipping
+    hand_outline_points = voronoi_polygons.get("hand_outline", None)
+    if hand_outline_points is None:
+        print("Warning: No 'hand_outline' polygon found in SVG. No clipping will be applied.")
 
     left_data = left_ts = right_data = right_ts = None
     all_left_interp = []
@@ -86,7 +106,7 @@ def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None, 
         left_min = np.min(left_data, axis=0)
         left_max = np.max(left_data, axis=0)
         left_range = left_max - left_min
-        left_range_safe = np.where(left_range > 1e-5, left_range, 1)  # Avoid divide-by-zero
+        left_range_safe = np.where(left_range > 1e-5, left_range, 1)  # Avoid div zero
 
     if right_h5:
         right_data, right_ts = load_data(right_h5)
@@ -96,9 +116,7 @@ def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None, 
         right_range = right_max - right_min
         right_range_safe = np.where(right_range > 1e-5, right_range, 1)
 
-
     # Time alignment
-    timestamps = None
     if left_ts is not None and right_ts is not None:
         start = max(left_ts[0], right_ts[0])
         end = min(left_ts[-1], right_ts[-1])
@@ -108,6 +126,8 @@ def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None, 
     elif right_ts is not None:
         start = right_ts[0]
         end = right_ts[-1]
+    else:
+        raise RuntimeError("No timestamps available")
 
     frame_count = int((end - start) * FPS)
     timestamps = np.linspace(start, end, frame_count)
@@ -121,7 +141,6 @@ def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None, 
             if use_normalized:
                 left_norm = (left_raw - left_min) / left_range_safe
                 left_scaled = left_norm * (MAX_PRESSURE - MIN_PRESSURE) + MIN_PRESSURE
-
             else:
                 left_scaled = np.copy(left_raw)
             all_left_interp.append(interpolate_fast(left_scaled, left_weights))
@@ -132,81 +151,70 @@ def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None, 
             if use_normalized:
                 right_norm = (right_raw - right_min) / right_range_safe
                 right_scaled = right_norm * (MAX_PRESSURE - MIN_PRESSURE) + MIN_PRESSURE
-
             else:
                 right_scaled = np.copy(right_raw)
             all_right_interp.append(interpolate_fast(right_scaled, right_weights))
 
-    # Set up figure
-    has_left = left_data is not None
-    has_right = right_data is not None
-    ncols = int(has_left) + int(has_right)
-    fig, axs = plt.subplots(1, ncols, figsize=(5 * ncols, 8), dpi=80)
-    if ncols == 1:
-        axs = [axs]
+    print(f"Rendering and encoding {frame_count} frames with pycairo + imageio...")
 
-    idx = 0
-    if has_left:
-        left_polys = [list(reversed(v)) for v in voronoi_polygons.values()]
-        left_collection = PolyCollection(left_polys, edgecolors='none')
-        axs[idx].add_collection(left_collection)
-        xs = [x for poly in left_polys for (x, y) in poly]
-        ys = [y for poly in left_polys for (x, y) in poly]
-        axs[idx].set_xlim(min(xs) - 10, max(xs) + 10)
-        axs[idx].set_ylim(max(ys) + 10, min(ys) - 10)
-        axs[idx].set_aspect('equal')
-        axs[idx].axis('off')
-        idx += 1
-    if has_right:
-        right_polys = [v for v in voronoi_polygons.values()]
-        right_collection = PolyCollection(right_polys, edgecolors='none')
-        xs = [x for poly in right_polys for (x, y) in poly]
-        ys = [y for poly in right_polys for (x, y) in poly]
-        axs[idx].set_xlim(min(xs) - 10, max(xs) + 10)
-        axs[idx].set_ylim(max(ys) + 10, min(ys) - 10)
-        axs[idx].add_collection(right_collection)
-        axs[idx].set_aspect('equal')
-        axs[idx].axis('off')
+    # Prepare polygon coordinate arrays for Cairo
+    left_polys = [list(reversed(v)) for v in voronoi_polygons.values()]
+    right_polys = [v for v in voronoi_polygons.values()]
 
-    # Write video
-    metadata = dict(title='Glove Pressure Visualization', artist='Your Name')
-    writer = FFMpegWriter(fps=FPS, metadata=metadata, codec='libx264', extra_args=['-preset', 'ultrafast'])
+    def draw_polys(ctx, polys, interp, use_norm):
+        for pid, coords in zip(polygon_labels, polys):
+            v = interp.get(pid, MIN_PRESSURE)
+            if use_norm and v >= NORMALIZED_VIS_THRESHOLD:
+                color = FALLBACK_COLOR[:3]
+            else:
+                color = value_to_color(v)
+            ctx.set_source_rgb(*color)
+            ctx.move_to(*coords[0])
+            for x, y in coords[1:]:
+                ctx.line_to(x, y)
+            ctx.close_path()
+            ctx.fill()
 
-    print(f"Writing video to {output_mp4}...")
-    with writer.saving(fig, output_mp4, dpi=80):
-        for i in range(frame_count):
-            if has_left:
-                left_colors = []
-                for k in polygon_labels:
-                    v = all_left_interp[i].get(k, MIN_PRESSURE)
-                    if use_normalized and v >= NORMALIZED_VIS_THRESHOLD:
-                        left_colors.append(FALLBACK_COLOR)
-                    else:
-                        left_colors.append(value_to_color(v))
-                left_collection.set_facecolors(left_colors)
+    frames = []
+    for i in range(frame_count):
+        surface = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
+        ctx = cairo.Context(surface)
+        # Fill background white
+        ctx.set_source_rgb(1, 1, 1)
+        ctx.paint()
 
-            if has_right:
-                right_colors = []
-                for k in polygon_labels:
-                    v = all_right_interp[i].get(k, MIN_PRESSURE)
-                    if use_normalized and v >= NORMALIZED_VIS_THRESHOLD:
-                        right_colors.append(FALLBACK_COLOR)
-                    else:
-                        right_colors.append(value_to_color(v))
-                right_collection.set_facecolors(right_colors)
+        # Apply clipping to hand outline if available
+        if hand_outline_points:
+            ctx.new_path()
+            ctx.move_to(*hand_outline_points[0])
+            for pt in hand_outline_points[1:]:
+                ctx.line_to(*pt)
+            ctx.close_path()
+            ctx.clip()
 
-            writer.grab_frame()
-            if i % 50 == 0:
-                print(f"Frame {i+1}/{frame_count}")
+        if left_data is not None:
+            draw_polys(ctx, left_polys, all_left_interp[i], use_normalized)
+        if right_data is not None:
+            draw_polys(ctx, right_polys, all_right_interp[i], use_normalized)
 
-    print("Video rendering complete.")
+        buf = surface.get_data()
+        frame = np.ndarray(shape=(height, width, 4), dtype=np.uint8, buffer=buf)
+        frame_rgb = frame[:, :, :3]
+        frames.append(frame_rgb.copy())
 
+        if i % 50 == 0:
+            print(f"Rendered frame {i}/{frame_count}")
+
+    imageio.mimsave(output_mp4, frames, fps=FPS, codec="libx264", quality=8)
+    print(f"Video saved to {output_mp4}")
 
 if __name__ == "__main__":
     create_video(
-        left_h5="./recordings/recentLeft.hdf5",
-        mapping_json="point_weight_mappings_large.json",
-        svg_file="voronoi_regions_large.svg",
-        output_mp4="glove_viz_pose.mp4",
-        use_normalized=False
+        right_h5="./recordings/smallglovedemo.hdf5",
+        mapping_json="point_weight_mappings_small.json",
+        svg_file="voronoi_regions_small.svg",
+        output_mp4="pressure_large_small_clipped.mp4",
+        use_normalized=False,
+        width=800,
+        height=800
     )

@@ -10,7 +10,7 @@ class Sensor():
         self.readWires = readWires
         self.selWires = selWires
         self.deviceName = deviceName
-        self.path = f'./{fileName}.hdf5' if fileName is not None else f'./recordings/recordings_{id}_{str(time.time())}.hdf5'
+        self.path = fileName if fileName is not None else f'./recordings/recordings_{id}_{str(time.time())}.hdf5'
         self.file = None
         self.pressure = np.zeros(readWires*selWires)
         self.fc = 0

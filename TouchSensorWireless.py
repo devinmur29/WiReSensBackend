@@ -27,23 +27,21 @@ from pathlib import Path
 
 
 class SerialProtocol(asyncio.Protocol):
-    def __init__(self, receiver):
-        """Initialize protocol with a reference to SerialReceiver."""
+    def __init__(self, receiver, sensorId):
         self.receiver = receiver
+        self.sensorId = sensorId
         self.transport = None
 
     def connection_made(self, transport):
-        """Called when the serial connection is established."""
         self.transport = transport
-        print("Connection established.")
+        print(f"Connection made for sensor {self.sensorId}")
 
     def data_received(self, data):
-        """Called when new data is received."""
-        self.receiver.buffer.put_nowait(data)  # Directly put data without creating a task
+        asyncio.ensure_future(self.receiver.buffers[self.sensorId].put(data))
 
     def connection_lost(self, exc):
-        """Called when the connection is lost or closed."""
-        print("Connection lost.")
+        print(f"Connection lost for sensor {self.sensorId}")
+
 
 
 class WifiReceiver(GenericReceiverClass):
@@ -202,65 +200,121 @@ class BLEReceiver(GenericReceiverClass):
         tasks = [self.connect_to_device(lock, name) for name in self.deviceNames]
         return tasks
 
+# New class to manage a single serial connection
+class SerialConnectionHandler:
+    def __init__(self, sensor, receiver):
+        self.sensor = sensor
+        self.receiver = receiver
+        self.partialData = b''
+        self.buffer = asyncio.Queue()
+        self.stopFlag = receiver.stopFlag
+        self.delimiter = b'wr'
+
+    async def read_lines(self):
+        print(f"Reading lines for sensor {self.sensor}")
+        while not self.stopFlag.is_set():
+            try:
+                data = await self.buffer.get()
+                self.partialData += data
+
+                while True:
+                    index = self.partialData.find(self.delimiter)
+                    if index == -1:
+                        break
+
+                    packet = self.partialData[:index]
+                    await self.receiver.process_line(packet)
+                    self.partialData = self.partialData[index + len(self.delimiter):]
+
+            except Exception as e:
+                print(f"[❌ read_lines error for sensor {self.sensor}] {e}")
+                break
 
 class SerialReceiver(GenericReceiverClass):
-    def __init__(self, numNodes, sensors, baudrate, stopFlag=None, record =True):
+    def __init__(self, numNodes, sensors: List[Sensor], baudrate, stopFlag=None, record=True):
         super().__init__(numNodes, sensors, record)
         self.baudrate = baudrate
-        self.stop_capture_event = False
-        self.reader = None
-        self.stopStr = bytes('wr','utf-8')
-        self.stopFlag = stopFlag
-        self.transports = []
+        self.stopFlag = stopFlag if stopFlag else asyncio.Event()
+        self.connections = {}  # sensorId -> (transport, protocol)
+        self.buffers = {}      # sensorId -> asyncio.Queue()
+        self.delimiter = b'wr'
+        self.transports = []   # List to keep track of transports for cleanup
+
+    async def listen_for_stop(self):
+        print("Listening for stop")
+        while not self.stopFlag.is_set():
+            input_str = await aioconsole.ainput("Press Enter to stop...\n")
+            if input_str == "":
+                self.stopFlag.set()
+                await self.stopReceiver()
+        print("Stop flag set, done listening for stop")
+    async def stopReceiver(self):
+        print("🔻 Stopping SerialReceiver...")
+        for transport in self.transports:
+            try:
+                transport.close()
+                transport.abort()  # ensure shutdown
+            except Exception as e:
+                print(f"⚠️ Error closing transport: {e}")
+
+        for sensorId, buffer in self.buffers.items():
+            try:
+                buffer.put_nowait(b"")  # inject dummy data to unblock .get()
+            except Exception as e:
+                print(f"⚠️ Error unblocking buffer for sensor {sensorId}: {e}")
+
+        print("✅ Transports closed and buffers unblocked.")
 
 
-    async def read_serial(self):
-        serObjs = []
-        print("Starting read task")
-        for sensor in self.sensors:
-            # ser = serial.Serial()
-            port = self.sensors[sensor].port
-            # print(ser.port)
-            # ser.baudrate = self.baudrate
-            # print(ser.baudrate)
-            # ser.dtr = False
-            # ser.rts = False
-            # ser.timeout=1
-            # ser.open()
-            # serObjs.append(ser)
-            loop = asyncio.get_running_loop()
-            # transport, protocol = await serial_asyncio.connection_for_serial(loop, lambda: SerialProtocol(self), ser)
-            print(f"making serial connection{self.sensors[sensor].id}")
-            transport, protocol = await serial_asyncio.create_serial_connection(
-                loop,
-                lambda: SerialProtocol(self),
-                port,
-                baudrate=self.baudrate
-            )
-            notify_device_connected(self.sensors[sensor].id, True)
-            self.transports.append(transport)
-        
-        
-        # Keep running until stopFlag is set
+
+    async def connect_sensor(self, sensor, port):
+        loop = asyncio.get_running_loop()
+        # transport, protocol = await serial_asyncio.connection_for_serial(loop, lambda: SerialProtocol(self), ser)
+        # print(f"making serial connection{self.sensors[sensor].id}")
+        transport, protocol = await serial_asyncio.create_serial_connection(
+            loop,
+            lambda: SerialProtocol(self, sensor),
+            port,
+            baudrate=self.baudrate
+        )
+        self.buffers[sensor] = asyncio.Queue()
+        notify_device_connected(self.sensors[sensor].id, True)
+        self.transports.append(transport)
         while not self.stopFlag.is_set():
             await asyncio.sleep(0.1)  # Avoid blocking loop
+        print(f"Disconnected to sensor {sensor} on port {port}")
 
-        print("Stopping serial reader.")
+    async def receiveData(self, sensorId):
+        print(f"Receiving data from sensor {sensorId}")
+        buffer = self.buffers[sensorId]
+        partialData = b''
+        while not self.stopFlag.is_set():
+            try:
+                data = await buffer.get()
+                partialData += data
+
+                while True:
+                    index = partialData.find(self.delimiter)
+                    if index == -1:
+                        break
+                    packet = partialData[:index]
+                    await self.process_line(packet)
+                    partialData = partialData[index + len(self.delimiter):]
+
+            except Exception as e:
+                print(f"[❌ receiveData error for sensor {sensorId}] {e}")
+                break
+        print(f"Stopping data reception for sensor {sensorId}")
         
 
-    
-
-    async def stopReceiver(self):
-        for transport in self.transports:
-            transport.close()
-        print("Transports stopped")
-
-
     def startReceiverThreads(self):
-        tasks=[]
-        tasks.append(self.read_serial())
-        tasks.append(self.read_lines())
-        tasks.append(self.listen_for_stop())
+        # Sync method to connect all sensors and return receive tasks
+        # loop = asyncio.get_event_loop()
+        tasks = []
+        for sensor in self.sensors:
+            tasks.append(self.connect_sensor(sensor, self.sensors[sensor].port))
+            tasks.append(self.receiveData(sensor))
+        tasks.append(self.listen_for_stop())  # Add stop listener task
         return tasks
 
 
@@ -274,8 +328,13 @@ def recordingsDirectory(recordings):
         os.makedirs(recordings)
 
 class MultiProtocolReceiver():
-    def __init__(self, configFilePath="./WiSensConfigClean.json"):
-        recordingsDirectory("recordings")
+    def __init__(self, folder="recordings", configFilePath="./WiSensConfigClean.json"):
+        self.recording_dir = os.path.join("ariarecordings", folder)
+        if os.path.exists(self.recording_dir):
+            raise FileExistsError(f"Directory '{self.recording_dir}' already exists.")
+        else:
+            os.makedirs(self.recording_dir)
+            print(f"✅ Created directory: {self.recording_dir}")
         self.config = readConfigFile(configFilePath)
         self.sensors = self.config['sensors']
         self.bleSensors = []
@@ -308,7 +367,12 @@ class MultiProtocolReceiver():
             numGroundWires = sensorConfig['endCoord'][1] - sensorConfig['startCoord'][1] + 1
             numReadWires = sensorConfig['endCoord'][0] - sensorConfig['startCoord'][0] + 1
             numNodes = min(userNumNodes,min(120, numGroundWires*numReadWires))
-            newSensor = Sensor(numGroundWires,numReadWires,numNodes,sensorConfig['id'],deviceName=deviceName,intermittent=intermittent, p=p, port=sensorConfig["serialPort"])
+            id = sensorConfig['id']
+            if id == 1:
+                fileName = os.path.join(self.recording_dir,"leftPressure.hdf5")
+            else:
+                fileName = os.path.join(self.recording_dir,"rightPressure.hdf5")
+            newSensor = Sensor(numGroundWires,numReadWires,numNodes,sensorConfig['id'],deviceName=deviceName,intermittent=intermittent, p=p, port=sensorConfig["serialPort"], fileName=fileName)
             
             match sensorConfig['protocol']:
                 case 'wifi':
@@ -470,7 +534,8 @@ class MultiProtocolReceiver():
             ser.close()
     
     async def startReceiversAsync(self):
-        await asyncio.gather(*self.receiveTasks)
+        await asyncio.gather(*self.receiveTasks, return_exceptions=True)
+        print("[🟢] All tasks completed.")
         # await self.listen_for_stop()
 
     async def listen_for_stop(self):
@@ -511,16 +576,28 @@ class MultiProtocolReceiver():
             self.receivers.append(wifiReceiver)
             self.receiveTasks += wifiReceiver.startReceiverThreads()
         if len(self.serialSensors)!=0:
-            serialReceiver = SerialReceiver(int(self.config['serialOptions']['numNodes']),self.serialSensors,self.config['serialOptions']['baudrate'],stopFlag=self.stopFlag,record=record)
+            serialReceiver = SerialReceiver(
+                int(self.config['serialOptions']['numNodes']),
+                self.serialSensors,
+                self.config['serialOptions']['baudrate'],
+                stopFlag=self.stopFlag,
+                record=record
+            )
             self.receivers.append(serialReceiver)
             self.receiveTasks += serialReceiver.startReceiverThreads()
         if web:
             self.receiveTasks.append(self.listen_for_stop_web())
-        else:
-            self.receiveTasks.append(self.listen_for_stop())
+        # else:
+        #     self.receiveTasks.append(self.listen_for_stop())
 
     def startReceiverThread(self):
-        asyncio.run(self.startReceiversAsync())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self.startReceiversAsync())
+        finally:
+            print("Stopping receiver thread.")
+            loop.close()
 
 
     def timeSyncQR(self):
@@ -545,7 +622,7 @@ class MultiProtocolReceiver():
         # Display using OpenCV (faster than external viewer)
         window_name = "Time Sync QR"
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(window_name, 600, 600)
+        cv2.resizeWindow(window_name, 800, 800)
         cv2.imshow(window_name, qr_cv)
 
         # Wait for any key (or keep visible for N seconds)
@@ -558,8 +635,18 @@ class MultiProtocolReceiver():
         self.initializeReceivers(True)
         captureThread = threading.Thread(target=self.startReceiverThread)
         captureThread.start()
-        # captureThread.join()
+         # Keep main thread alive so interpreter doesn’t shut down
         self.timeSyncQR()
+        while captureThread.is_alive():
+            time.sleep(0.1) 
+            if self.stopFlag.is_set():
+                print("Stop flag detected, stopping capture thread.")
+                break
+        self.stopFlag.set()  # Signal the stop flag to all receivers
+        print("Waiting for capture thread to finish...")
+        self.receiveTasks=[]
+        captureThread.join()  # Wait for full thread cleanup
+        print("Capture thread stopped cleanly.")
 
     def visualizeAndRecord(self):
         self.initializeReceivers(True)
@@ -679,5 +766,3 @@ if __name__ == "__main__":
     utils.programSensor(1)
     myReceiver = MultiProtocolReceiver()
     myReceiver.visualize()
-    
-

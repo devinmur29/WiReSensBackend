@@ -46,7 +46,7 @@
   },
 
   "espnowOptions": {
-    "macAddress": [160, 163, 179, 144, 124, 188],
+    "macAddress": [20,43,47,202,103,124],
     "numNodes":120
   },
 

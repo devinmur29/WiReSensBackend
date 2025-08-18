@@ -19,7 +19,7 @@
     {
       "id": 2,
       "protocol": "serial",
-      "serialPort": "COM20",
+      "serialPort": "COM15",
       "deviceName": "Esp2",
       "startCoord": [0, 0],
       "endCoord": [15, 15],

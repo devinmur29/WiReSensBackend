@@ -28,7 +28,7 @@
     {
       "id": 1,
       "protocol": "serial",
-      "serialPort": "COM27",
+      "serialPort": "COM9",
       "deviceName": "Esp1",
       "startCoord": [
         0,
