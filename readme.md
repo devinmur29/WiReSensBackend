@@ -43,7 +43,6 @@ This guide walks you through the full process of recording tactile sensor data u
 
    * **If the transmitter uses WiFi or Bluetooth:**
      → The transmitter can operate untethered (powered via battery).
-     → Ensure the receiver is properly configured to listen over the selected protocol.
 
    * **If the transmitter has just been flashed or reconfigured:**
      → You **must** connect it to your computer over USB at least once to complete configuration.
