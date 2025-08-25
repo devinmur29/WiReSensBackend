@@ -329,12 +329,9 @@ def recordingsDirectory(recordings):
 
 class MultiProtocolReceiver():
     def __init__(self, folder="recordings", configFilePath="./WiSensConfigClean.json"):
-        self.recording_dir = os.path.join("ariarecordings", folder)
-        if os.path.exists(self.recording_dir):
-            raise FileExistsError(f"Directory '{self.recording_dir}' already exists.")
-        else:
-            os.makedirs(self.recording_dir)
-            print(f"✅ Created directory: {self.recording_dir}")
+        self.recording_dir = os.path.join(os.getcwd(), folder)
+        recordingsDirectory(self.recording_dir)
+        print(f"✅ Created directory: {self.recording_dir}")
         self.config = readConfigFile(configFilePath)
         self.sensors = self.config['sensors']
         self.bleSensors = []
@@ -368,11 +365,7 @@ class MultiProtocolReceiver():
             numReadWires = sensorConfig['endCoord'][0] - sensorConfig['startCoord'][0] + 1
             numNodes = min(userNumNodes,min(120, numGroundWires*numReadWires))
             id = sensorConfig['id']
-            if id == 1:
-                fileName = os.path.join(self.recording_dir,"leftPressure.hdf5")
-            else:
-                fileName = os.path.join(self.recording_dir,"rightPressure.hdf5")
-            newSensor = Sensor(numGroundWires,numReadWires,numNodes,sensorConfig['id'],deviceName=deviceName,intermittent=intermittent, p=p, port=sensorConfig["serialPort"], fileName=fileName)
+            newSensor = Sensor(numGroundWires,numReadWires,numNodes,sensorConfig['id'],deviceName=deviceName,intermittent=intermittent, p=p, port=sensorConfig["serialPort"])
             
             match sensorConfig['protocol']:
                 case 'wifi':

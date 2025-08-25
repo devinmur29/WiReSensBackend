@@ -1,220 +1,266 @@
-import h5py
-import json
 import numpy as np
-import cairo
-import imageio.v2 as imageio
-from xml.etree import ElementTree as ET
+import cv2
+import h5py
+from shapely.geometry import Polygon, Point
+from svgpathtools import svg2paths2, parse_path
+from lxml import etree
+from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
+import os
+import argparse
 
-FPS = 20
-MAX_PRESSURE, MIN_PRESSURE = 3000, 0
-NORMALIZED_VIS_THRESHOLD = 2500
-FALLBACK_COLOR = (0.2, 0.2, 0.2, 1.0)  # dark gray RGBA
+# --- Try CuPy, fallback to NumPy ---
+try:
+    import cupy as cp
+    _ = cp.zeros(1)  # test GPU
+    xp = cp
+    GPU_AVAILABLE = True
+    print("✅ Using GPU with CuPy")
+except Exception:
+    cp = np  # alias so code compiles
+    xp = np
+    GPU_AVAILABLE = False
+    print("⚠️ CuPy/CUDA not available, falling back to CPU (NumPy)")
 
-def load_data(h5_path):
-    with h5py.File(h5_path, 'r') as f:
-        fc = f['frame_count'][0]
-        ts = np.array(f['ts'][:fc])
-        pressure = np.array(f['pressure'][:fc]).astype(np.float32)
-    return pressure, ts
+# --- Parameters ---
+sigma = 25
+max_value = 2000
+canvas_width = 800
+canvas_height = 1000
+fps = 30
+max_distance = 400
+batch_size = 10000  # pixels per batch for memory efficiency
 
-def parse_svg(svg_file):
-    tree = ET.parse(svg_file)
+# --- SVG loading ---
+def load_svg_points_and_contour(svg_file, is_right_hand=False):
+    print(f"Loading SVG file: {svg_file}")
+    paths, attributes, _ = svg2paths2(svg_file)
+    outer_path_d = next((attr['d'] for attr in attributes if attr.get('id') == 'outerContour'), None)
+    if outer_path_d is None:
+        raise ValueError("SVG missing path with id='outerContour'")
+    path_obj = parse_path(outer_path_d)
+    outer_poly = Polygon([(seg.start.real, seg.start.imag) for seg in path_obj])
+    tree = etree.parse(svg_file)
     root = tree.getroot()
-    ns = {'svg': 'http://www.w3.org/2000/svg'}
-    polygons = {}
-    for poly in root.findall('.//svg:polygon', ns):
-        pid = poly.attrib['id']
-        points = [tuple(map(float, p.split(','))) for p in poly.attrib['points'].strip().split()]
-        polygons[pid] = points
-    return polygons
+    ns = {'svg': root.nsmap[None]}
+    source_points = {
+        circle.get('id'): (float(circle.get('cx')), float(circle.get('cy')))
+        for circle in root.findall('.//svg:circle', ns) if circle.get('id') is not None
+    }
+    source_points = dict(sorted(source_points.items()))
+    if len(source_points) == 0:
+        raise ValueError("No source points found in SVG")
+    if is_right_hand:
+        source_indices = [(15 - int(y), 15 - int(x)) for (x, y) in [sid.split('-') for sid in source_points]]
+    else:
+        source_indices = [(int(x), int(y)) for (x, y) in [sid.split('-') for sid in source_points]]
+    return outer_poly, source_points, source_indices
 
-def precompute_weights(mapping, is_left=True):
-    weights = {}
-    for label, neighbors in mapping.items():
-        matrix = np.zeros((16, 16), dtype=np.float32)
-        total_weight = 0.0
-        for q in ['NE', 'NW', 'SW', 'SE']:
-            source_id, dist = neighbors[q]
-            if source_id != 'N/A':
-                y, x = map(int, source_id.split('-'))
-                if not is_left:
-                    y, x = 15 - x, 15 - y
-                weight = 1 / dist if dist and dist > 0.001 else 1e6
-                matrix[y, x] += weight
-                total_weight += weight
-        if total_weight > 0:
-            matrix /= total_weight
-        weights[label] = matrix
+def compute_transform(polygon, width, height, padding=10):
+    minx, miny, maxx, maxy = polygon.bounds
+    scale = min((width - 2 * padding) / (maxx - minx), (height - 2 * padding) / (maxy - miny))
+    tx, ty = -minx * scale + padding, -miny * scale + padding
+    return scale, tx, ty
+
+def apply_transform(polygon, points_dict, scale, tx, ty):
+    poly = Polygon([(x * scale + tx, y * scale + ty) for x, y in polygon.exterior.coords])
+    points = {k: (x * scale + tx, y * scale + ty) for k, (x, y) in points_dict.items()}
+    return poly, points
+
+def get_pixels_in_contour(polygon, width, height):
+    xs, ys = np.arange(width), np.arange(height)
+    xv, yv = np.meshgrid(xs, ys)
+    points = [Point(x, y) for x, y in zip(xv.ravel(), yv.ravel())]
+    mask = np.array([polygon.contains(pt) for pt in points])
+    return np.stack([xv.ravel()[mask], yv.ravel()[mask]], axis=1)
+
+# --- Chunked weights computation (GPU or CPU) ---
+def compute_weights_visibility_aware_chunked(pixel_coords, source_points, polygon, sigma, max_dist, batch_size=10000):
+    print(f"Starting visibility-aware weight computation ({'GPU' if GPU_AVAILABLE else 'CPU'})...")
+    n_pixels = pixel_coords.shape[0]
+    n_sources = len(source_points)
+    weights = xp.zeros((n_pixels, n_sources), dtype=xp.float32)
+
+    px_all = xp.asarray(pixel_coords[:,0], dtype=xp.float32)
+    py_all = xp.asarray(pixel_coords[:,1], dtype=xp.float32)
+    source_arr = xp.asarray(list(source_points.values()), dtype=xp.float32)
+
+    coords = xp.asarray(np.array(polygon.exterior.coords), dtype=xp.float32)
+    edges_start = coords[:-1]; edges_end = coords[1:]
+
+    def ccw(ax, ay, bx, by, cx, cy):
+        return (cy - ay)*(bx-ax) > (by - ay)*(cx-ax)
+
+    for start in tqdm(range(0, n_pixels, batch_size)):
+        end = min(start + batch_size, n_pixels)
+        px = px_all[start:end, None]; py = py_all[start:end, None]
+
+        dx = px - source_arr[None,:,0]; dy = py - source_arr[None,:,1]
+        dist = xp.sqrt(dx**2 + dy**2)
+        mask = dist <= max_dist if max_dist>0 else xp.ones_like(dist, dtype=bool)
+
+        vis = xp.ones_like(mask)
+        for ex1, ey1, ex2, ey2 in zip(edges_start[:,0], edges_start[:,1], edges_end[:,0], edges_end[:,1]):
+            sx = source_arr[:,0][None,:]; sy = source_arr[:,1][None,:]
+            intersect = (
+                ccw(px, py, ex1, ey1, ex2, ey2) != ccw(sx, sy, ex1, ey1, ex2, ey2)
+            ) & (
+                ccw(px, py, sx, sy, ex1, ey1) != ccw(px, py, sx, sy, ex2, ey2)
+            )
+            vis &= ~intersect
+
+        final_mask = mask & vis
+        w = xp.exp(-(dist**2)/(2*sigma**2)) * final_mask
+        sum_w = xp.sum(w, axis=1, keepdims=True)
+        valid_sum_mask = sum_w > 1e-6
+        w_normalized = xp.zeros_like(w)
+        w_normalized[valid_sum_mask.flatten()] = w[valid_sum_mask.flatten()] / sum_w[valid_sum_mask.flatten()]
+        weights[start:end] = w_normalized
+
     return weights
 
-def interpolate_fast(pressure16x16, precomputed_weights):
-    out = {}
-    for label, W in precomputed_weights.items():
-        out[label] = np.sum(W * pressure16x16)
-    return out
+def values_to_bgr(values_arr):
+    values = xp.asnumpy(values_arr) if GPU_AVAILABLE else values_arr
+    values = values.astype(np.float32)
+    bgr = np.zeros((values.shape[0], 3), dtype=np.uint8)
 
-def hsv_to_rgb(h, s, v):
-    h = h % 360
-    c = v * s
-    x = c * (1 - abs((h / 60) % 2 - 1))
-    m = v - c
+    no_data_mask = values < 0
+    no_data_color = np.array([192, 192, 192], dtype=np.uint8)
+    bgr[no_data_mask] = no_data_color
 
-    if h < 60:
-        rp, gp, bp = c, x, 0
-    elif h < 120:
-        rp, gp, bp = x, c, 0
-    elif h < 180:
-        rp, gp, bp = 0, c, x
-    elif h < 240:
-        rp, gp, bp = 0, x, c
-    elif h < 300:
-        rp, gp, bp = x, 0, c
+    valid_data_mask = ~no_data_mask
+    valid_values = values[valid_data_mask]
+
+    v_norm = valid_values / max_value
+    v_clipped = np.clip(v_norm, 0.0, 1.0)
+
+    hsv_valid = np.zeros((valid_values.shape[0], 1, 3), dtype=np.float32)
+    hsv_valid[..., 0] = (v_clipped * 240.0).reshape(-1, 1)
+    hsv_valid[..., 1] = 1.0
+    hsv_valid[..., 2] = 1.0
+
+    valid_bgr = cv2.cvtColor(hsv_valid, cv2.COLOR_HSV2BGR).reshape(-1, 3) * 255
+    bgr[valid_data_mask] = valid_bgr.astype(np.uint8)
+
+    full_v_norm = np.zeros_like(values)
+    full_v_norm[valid_data_mask] = v_norm
+    bgr[full_v_norm > 1.0] = no_data_color
+
+    return bgr.astype(np.uint8)
+
+def render_frame(pressure_frame, weights, pixel_coords, width, height, source_indices):
+    pressure_flat = np.array([pressure_frame[row, col] for (row, col) in source_indices], dtype=np.float32)
+    pixel_vals = weights @ (xp.asarray(pressure_flat) if GPU_AVAILABLE else pressure_flat)
+    sum_of_weights = xp.sum(weights, axis=1)
+    no_signal_mask = sum_of_weights < 1e-6
+    pixel_vals[no_signal_mask] = -1
+    colors_bgr = values_to_bgr(pixel_vals)
+    img = np.ones((height, width, 3), dtype=np.uint8) * 255
+    px = np.clip(pixel_coords[:, 0], 0, width - 1).astype(int)
+    py = np.clip(pixel_coords[:, 1], 0, height - 1).astype(int)
+    img[py, px] = colors_bgr
+    return img
+
+def make_frame_processor(weights, pixel_coords, width, height, source_indices, ts_array, pressure_array):
+    def interpolate_pressure(ts_array, pressure_array, target_ts):
+        idx = np.searchsorted(ts_array, target_ts)
+        if idx == 0: return pressure_array[0]
+        if idx >= len(ts_array): return pressure_array[-1]
+        t0, t1 = ts_array[idx-1], ts_array[idx]
+        p0, p1 = pressure_array[idx-1], pressure_array[idx]
+        alpha = (target_ts - t0) / (t1 - t0)
+        return (1-alpha)*p0 + alpha*p1
+
+    def process_single_frame(t):
+        pressure_frame = interpolate_pressure(ts_array, pressure_array, t)
+        return render_frame(pressure_frame, weights, pixel_coords, width, height, source_indices)
+
+    return process_single_frame
+
+def load_glove_data(h5_path):
+    with h5py.File(h5_path, 'r') as f:
+        frame_count = f['frame_count'][0]
+        ts = np.array(f['ts'][:frame_count])
+        pressure = np.array(f['pressure'][:frame_count])
+    return ts, pressure
+
+def get_cache_path(svg_file, is_right_hand, sigma, max_distance, width, height):
+    basename = os.path.basename(svg_file).split('.')[0]
+    side = 'right' if is_right_hand else 'left'
+    return f'weights_cache_{basename}_{side}_s{sigma}_d{max_distance}_w{width}_h{height}.npz'
+
+def prepare_renderer(h5_path, svg_file, is_right_hand):
+    print(f"Preparing renderer for {'right' if is_right_hand else 'left'} hand with HDF5: {h5_path} and SVG: {svg_file}")
+    
+    cache_path = get_cache_path(svg_file, is_right_hand, sigma, max_distance, canvas_width, canvas_height)
+    outer_poly, source_points, source_indices = load_svg_points_and_contour(svg_file, is_right_hand=is_right_hand)
+    scale, tx, ty = compute_transform(outer_poly, canvas_width, canvas_height)
+    outer_poly, source_points = apply_transform(outer_poly, source_points, scale, tx, ty)
+
+    if os.path.exists(cache_path):
+        print(f"Loading precomputed weights from: {cache_path}")
+        cache = np.load(cache_path)
+        weights = xp.asarray(cache['weights']) if GPU_AVAILABLE else cache['weights']
+        pixel_coords = cache['pixel_coords']
     else:
-        rp, gp, bp = c, 0, x
+        pixel_coords = get_pixels_in_contour(outer_poly, canvas_width, canvas_height)
+        weights = compute_weights_visibility_aware_chunked(
+            pixel_coords, source_points, outer_poly, sigma, max_distance, batch_size=batch_size)
+        np.savez_compressed(cache_path, weights=(cp.asnumpy(weights) if GPU_AVAILABLE else weights), pixel_coords=pixel_coords)
+        print(f"Saved weights cache to: {cache_path}")
 
-    r, g, b = rp + m, gp + m, bp + m
-    return (r, g, b)
+    ts_array, pressure_array = load_glove_data(h5_path)
+    return make_frame_processor(weights, pixel_coords, canvas_width, canvas_height,
+                                source_indices, ts_array, pressure_array), ts_array
 
-def value_to_color(val):
-    clamped = np.clip(val, MIN_PRESSURE, MAX_PRESSURE)
-    norm = (clamped - MIN_PRESSURE) / (MAX_PRESSURE - MIN_PRESSURE)
-    hue = (1 - norm) * 240  # 240 = blue, 0 = red
-    return hsv_to_rgb(hue, 1.0, 1.0)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--left_h5', type=str, help='Path to left glove HDF5 file')
+    parser.add_argument('--right_h5', type=str, help='Path to right glove HDF5 file')
+    parser.add_argument('--small', action='store_true', help='Use small glove SVG if set')
+    parser.add_argument('--output', type=str, default='tactile_overlay.mp4')
+    args = parser.parse_args()
 
-def create_video(left_h5=None, right_h5=None, mapping_json=None, svg_file=None,
-                 output_mp4="output.mp4", use_normalized=True,
-                 width=800, height=800):
+    assert args.left_h5 or args.right_h5, "At least one of --left_h5 or --right_h5 must be provided"
 
-    assert left_h5 or right_h5, "At least one of left_h5 or right_h5 must be provided."
+    small_svg = "source_points_left_small.svg"
+    large_svg = "source_points_left_large.svg"
 
-    mapping = json.load(open(mapping_json))
-    voronoi_polygons = parse_svg(svg_file)
-    polygon_labels = list(voronoi_polygons.keys())
+    if args.left_h5:
+        left_svg = small_svg if args.small else large_svg
+        left_renderer, ts_left = prepare_renderer(args.left_h5, left_svg, is_right_hand=False)
+    if args.right_h5:
+        right_svg = small_svg if args.small else large_svg
+        right_renderer, ts_right = prepare_renderer(args.right_h5, right_svg, is_right_hand=True)
 
-    # Extract hand outline polygon points for clipping
-    hand_outline_points = voronoi_polygons.get("hand_outline", None)
-    if hand_outline_points is None:
-        print("Warning: No 'hand_outline' polygon found in SVG. No clipping will be applied.")
-
-    left_data = left_ts = right_data = right_ts = None
-    all_left_interp = []
-    all_right_interp = []
-
-    if left_h5:
-        left_data, left_ts = load_data(left_h5)
-        left_weights = precompute_weights(mapping, is_left=True)
-        left_min = np.min(left_data, axis=0)
-        left_max = np.max(left_data, axis=0)
-        left_range = left_max - left_min
-        left_range_safe = np.where(left_range > 1e-5, left_range, 1)  # Avoid div zero
-
-    if right_h5:
-        right_data, right_ts = load_data(right_h5)
-        right_weights = precompute_weights(mapping, is_left=False)
-        right_min = np.min(right_data, axis=0)
-        right_max = np.max(right_data, axis=0)
-        right_range = right_max - right_min
-        right_range_safe = np.where(right_range > 1e-5, right_range, 1)
-
-    # Time alignment
-    if left_ts is not None and right_ts is not None:
-        start = max(left_ts[0], right_ts[0])
-        end = min(left_ts[-1], right_ts[-1])
-    elif left_ts is not None:
-        start = left_ts[0]
-        end = left_ts[-1]
-    elif right_ts is not None:
-        start = right_ts[0]
-        end = right_ts[-1]
+    if args.left_h5 and args.right_h5:
+        ts_min = max(ts_left[0], ts_right[0])
+        ts_max = min(ts_left[-1], ts_right[-1])
+        uniform_ts = np.arange(ts_min, ts_max, 1 / fps)
+    elif args.left_h5:
+        uniform_ts = np.arange(ts_left[0], ts_left[-1], 1 / fps)
     else:
-        raise RuntimeError("No timestamps available")
+        uniform_ts = np.arange(ts_right[0], ts_right[-1], 1 / fps)
 
-    frame_count = int((end - start) * FPS)
-    timestamps = np.linspace(start, end, frame_count)
+    out_width = canvas_width * (2 if (args.left_h5 and args.right_h5) else 1)
+    writer = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*'mp4v'), fps, (out_width, canvas_height))
 
-    print(f"Precomputing {frame_count} {'normalized' if use_normalized else 'raw'} frames...")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        with tqdm(total=len(uniform_ts), desc="Rendering frames") as pbar:
+            for t in uniform_ts:
+                if args.left_h5 and args.right_h5:
+                    left_frame = left_renderer(t)
+                    right_frame = right_renderer(t)
+                    combined = np.hstack([left_frame, right_frame])
+                elif args.left_h5:
+                    combined = left_renderer(t)
+                else:
+                    combined = right_renderer(t)
+                writer.write(combined)
+                pbar.update()
 
-    for t in timestamps:
-        if left_data is not None:
-            lf_idx = np.searchsorted(left_ts, t)
-            left_raw = left_data[min(lf_idx, len(left_data) - 1)]
-            if use_normalized:
-                left_norm = (left_raw - left_min) / left_range_safe
-                left_scaled = left_norm * (MAX_PRESSURE - MIN_PRESSURE) + MIN_PRESSURE
-            else:
-                left_scaled = np.copy(left_raw)
-            all_left_interp.append(interpolate_fast(left_scaled, left_weights))
-
-        if right_data is not None:
-            rt_idx = np.searchsorted(right_ts, t)
-            right_raw = right_data[min(rt_idx, len(right_data) - 1)]
-            if use_normalized:
-                right_norm = (right_raw - right_min) / right_range_safe
-                right_scaled = right_norm * (MAX_PRESSURE - MIN_PRESSURE) + MIN_PRESSURE
-            else:
-                right_scaled = np.copy(right_raw)
-            all_right_interp.append(interpolate_fast(right_scaled, right_weights))
-
-    print(f"Rendering and encoding {frame_count} frames with pycairo + imageio...")
-
-    # Prepare polygon coordinate arrays for Cairo
-    left_polys = [list(reversed(v)) for v in voronoi_polygons.values()]
-    right_polys = [v for v in voronoi_polygons.values()]
-
-    def draw_polys(ctx, polys, interp, use_norm):
-        for pid, coords in zip(polygon_labels, polys):
-            v = interp.get(pid, MIN_PRESSURE)
-            if use_norm and v >= NORMALIZED_VIS_THRESHOLD:
-                color = FALLBACK_COLOR[:3]
-            else:
-                color = value_to_color(v)
-            ctx.set_source_rgb(*color)
-            ctx.move_to(*coords[0])
-            for x, y in coords[1:]:
-                ctx.line_to(x, y)
-            ctx.close_path()
-            ctx.fill()
-
-    frames = []
-    for i in range(frame_count):
-        surface = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
-        ctx = cairo.Context(surface)
-        # Fill background white
-        ctx.set_source_rgb(1, 1, 1)
-        ctx.paint()
-
-        # Apply clipping to hand outline if available
-        if hand_outline_points:
-            ctx.new_path()
-            ctx.move_to(*hand_outline_points[0])
-            for pt in hand_outline_points[1:]:
-                ctx.line_to(*pt)
-            ctx.close_path()
-            ctx.clip()
-
-        if left_data is not None:
-            draw_polys(ctx, left_polys, all_left_interp[i], use_normalized)
-        if right_data is not None:
-            draw_polys(ctx, right_polys, all_right_interp[i], use_normalized)
-
-        buf = surface.get_data()
-        frame = np.ndarray(shape=(height, width, 4), dtype=np.uint8, buffer=buf)
-        frame_rgb = frame[:, :, :3]
-        frames.append(frame_rgb.copy())
-
-        if i % 50 == 0:
-            print(f"Rendered frame {i}/{frame_count}")
-
-    imageio.mimsave(output_mp4, frames, fps=FPS, codec="libx264", quality=8)
-    print(f"Video saved to {output_mp4}")
+    writer.release()
+    print(f"Saved video to {args.output}")
 
 if __name__ == "__main__":
-    create_video(
-        right_h5="./recordings/smallglovedemo.hdf5",
-        mapping_json="point_weight_mappings_small.json",
-        svg_file="voronoi_regions_small.svg",
-        output_mp4="pressure_large_small_clipped.mp4",
-        use_normalized=False,
-        width=800,
-        height=800
-    )
+    main()
