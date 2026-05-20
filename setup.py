@@ -24,6 +24,7 @@ setup(
     # List all the dependencies your package needs to run
     install_requires=[
         "numpy",
+        "matplotlib",
         "h5py",
         "json5",
         "pyserial",
