@@ -1,4 +1,11 @@
 from setuptools import setup, find_packages
+import os
+
+# Check if we are inside a GitHub Codespace
+is_codespace = os.environ.get("CODESPACES") == "true"
+
+# Select the appropriate OpenCV package
+opencv_pkg = "opencv-python-headless" if is_codespace else "opencv-python"
 
 
 setup(
@@ -12,6 +19,7 @@ setup(
     # Find the package in the 'src' directory
     package_dir={"": "src"},
     packages=find_packages(where="src"),
+
     
     # List all the dependencies your package needs to run
     install_requires=[
@@ -22,8 +30,10 @@ setup(
         "pyserial-asyncio",
         "bleak",
         "aioconsole",
-        "opencv-python",
+        opencv_pkg,
         "qrcode[pil]",
+        "ipykernel",
+        "jupyter"
     ],
     python_requires='>=3.8',
 )

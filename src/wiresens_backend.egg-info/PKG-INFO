@@ -1,4 +1,4 @@
-Metadata-Version: 2.4
+Metadata-Version: 2.1
 Name: wiresens_backend
 Version: 0.1.0
 Summary: A backend for wireless tactile sensor data acquisition.
@@ -12,13 +12,9 @@ Requires-Dist: pyserial
 Requires-Dist: pyserial-asyncio
 Requires-Dist: bleak
 Requires-Dist: aioconsole
-Requires-Dist: opencv-python
+Requires-Dist: opencv-python-headless
 Requires-Dist: qrcode[pil]
-Dynamic: author
-Dynamic: description
-Dynamic: description-content-type
-Dynamic: requires-dist
-Dynamic: requires-python
-Dynamic: summary
+Requires-Dist: ipykernel
+Requires-Dist: jupyter
 
 Long description of the WiReSens backend package.
