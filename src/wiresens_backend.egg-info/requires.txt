@@ -1,0 +1,9 @@
+numpy
+h5py
+json5
+pyserial
+pyserial-asyncio
+bleak
+aioconsole
+opencv-python
+qrcode[pil]

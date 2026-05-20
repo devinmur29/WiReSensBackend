@@ -6,23 +6,38 @@
     "ssid": "MLDEV",
     "password": ""
   },
-
   "readoutOptions": {
-    "groundPins": [26, 25, 4, 21, 12],
-    "readPins": [27, 33, 15, 32, 14],
+    "groundPins": [
+      26,
+      25,
+      4,
+      21,
+      12
+    ],
+    "readPins": [
+      27,
+      33,
+      15,
+      32,
+      14
+    ],
     "adcPin": 34,
-    "externalAdc":true
-
+    "externalAdc": true
   },
-
   "sensors": [
     {
       "id": 2,
       "protocol": "serial",
-      "serialPort": "COM15",
+      "serialPort": "COM12",
       "deviceName": "Esp2",
-      "startCoord": [0, 0],
-      "endCoord": [15, 15],
+      "startCoord": [
+        0,
+        0
+      ],
+      "endCoord": [
+        15,
+        15
+      ],
       "resistance": 3,
       "intermittent": {
         "enabled": false,
@@ -32,28 +47,31 @@
       "outlineImage": "",
       "saturatedPercentage": 1,
       "duration": 60000,
-      "glove":"right",
-      "size":"small"
+      "glove": "right",
+      "size": "small"
     }
   ],
-
   "serialOptions": {
     "baudrate": 250000,
     "numNodes": 120
   },
-
   "bleOptions": {
     "numNodes": 120
   },
-
   "espnowOptions": {
-    "macAddress": [160, 163, 179, 144, 124, 188],
-    "numNodes":120
+    "macAddress": [
+      160,
+      163,
+      179,
+      144,
+      124,
+      188
+    ],
+    "numNodes": 120
   },
-
   "vizOptions": {
     "pitch": 0,
     "localIp": "",
-    "glove":true
+    "glove": true
   }
 }

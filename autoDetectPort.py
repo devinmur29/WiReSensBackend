@@ -1,5 +1,5 @@
 import argparse
-from utils import discoverPorts
+from wiresens_backend.utils import discoverPorts
 
 # Parse the --small flag
 parser = argparse.ArgumentParser(description="Run discoverPorts with config file based on glove size.")

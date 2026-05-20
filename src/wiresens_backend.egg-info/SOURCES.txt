@@ -1,0 +1,11 @@
+setup.py
+src/wiresens_backend/GenericReceiver.py
+src/wiresens_backend/Sensor.py
+src/wiresens_backend/TouchSensorWireless.py
+src/wiresens_backend/__init__.py
+src/wiresens_backend/utils.py
+src/wiresens_backend.egg-info/PKG-INFO
+src/wiresens_backend.egg-info/SOURCES.txt
+src/wiresens_backend.egg-info/dependency_links.txt
+src/wiresens_backend.egg-info/requires.txt
+src/wiresens_backend.egg-info/top_level.txt

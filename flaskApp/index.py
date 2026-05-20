@@ -5,6 +5,7 @@ import json
 from flask_socketio import SocketIO
 from flask_cors import CORS
 import time
+import h5py
 import numpy as np
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}) 
@@ -32,6 +33,7 @@ def replay_sensors( pressureDict, frameRate, numFrames):
             jsonSensors = json.dumps(sensors)
             socketio.emit('sensor_data', jsonSensors)
             time.sleep(1/frameRate)
+
 
 def update_sensors(allSensors):
     with app.app_context():
@@ -67,6 +69,32 @@ def handle_start_viz(data):
     if myReceiver:
         myReceiver.updateConfig(data)
         socketio.start_background_task(myReceiver.visualize_web)
+
+@socketio.on('record_replay')
+def handle_record_replay(data):
+    hdf5_path = data['hdf5Path']
+    sensor_id = data.get('sensorId', '1')
+    frame_rate = float(data.get('frameRate', 30))
+    num_frames = data.get('numFrames')
+    filename   = data.get('filename', 'heatmap_replay')
+
+    # Load data
+    with h5py.File(hdf5_path, 'r') as f:
+        frames = f[sensor_id][:]   # shape: (num_frames, rows, cols)
+
+    if num_frames is None:
+        num_frames = len(frames)
+
+    # Tell browser to start recording
+    socketio.emit('start_recording', {'fps': frame_rate, 'filename': filename})
+    time.sleep(0.5)   # give the browser a moment to initialise MediaRecorder
+
+    # Replay using your existing replay_sensors function
+    pressureDict = {int(sensor_id): frames}
+    replay_sensors(pressureDict, frame_rate, num_frames)
+
+    # Tell browser to save the file
+    socketio.emit('stop_recording', {'filename': filename})
 
 @socketio.on('stopViz')
 def handle_stop_viz():

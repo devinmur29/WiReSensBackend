@@ -17,12 +17,12 @@
   "sensors": [
     {
       "id": 2,
-      "protocol": "espnow",
-      "serialPort": "COM20",
+      "protocol": "serial",
+      "serialPort": "COM18",
       "deviceName": "Esp2",
       "startCoord": [0, 0],
       "endCoord": [15, 15],
-      "resistance": 3,
+      "resistance": 120,
       "intermittent": {
         "enabled": false,
         "p": 21,
@@ -32,7 +32,7 @@
       "saturatedPercentage": 1,
       "duration": 60000,
       "glove":"right",
-      "size":"large"
+      "size":"small"
     }
   ],
 
@@ -46,7 +46,7 @@
   },
 
   "espnowOptions": {
-    "macAddress": [20,43,47,202,103,124],
+    "macAddress": [240,36,249,232,92,0],
     "numNodes":120
   },
 

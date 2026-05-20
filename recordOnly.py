@@ -1,5 +1,5 @@
 import argparse
-from TouchSensorWireless import MultiProtocolReceiver
+from wiresens_backend.TouchSensorWireless import MultiProtocolReceiver
 
 # Argument parsing
 parser = argparse.ArgumentParser(description="Run MultiProtocolReceiver with specified folder and config.")

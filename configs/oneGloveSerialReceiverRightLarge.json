@@ -19,11 +19,11 @@
     {
       "id": 2,
       "protocol": "serial",
-      "serialPort": "COM19",
+      "serialPort": "COM17",
       "deviceName": "Esp2",
       "startCoord": [0, 0],
       "endCoord": [15, 15],
-      "resistance": 3,
+      "resistance": 122,
       "intermittent": {
         "enabled": false,
         "p": 21,
