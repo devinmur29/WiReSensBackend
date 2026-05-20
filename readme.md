@@ -52,7 +52,7 @@ This guide walks you through the full process of recording tactile sensor data u
    WiReSens uses JSON configuration files to reference sensor devices by their serial port. To auto-detect and assign the correct port, run:
 
    ```
-   python autoDetectPort.py
+   python autoDetectPort.py --right
    ```
 
    This script scans available serial ports, identifies known microcontrollers, and updates the relevant JSON config files.
